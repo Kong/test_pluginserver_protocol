@@ -1,13 +1,25 @@
 #!/usr/bin/python3
 
 import argparse
-from typing import cast, Any, Optional
 import json
 import sys
+import logging
 
 from socketserver import ThreadingMixIn, UnixStreamServer, StreamRequestHandler
 
 import msgpack
+
+
+class MpStream():
+	def __init__(self, socket):
+		self.socket = socket
+		self.packer = msgpack.Packer()
+		self.unpacker = msgpack.Unpacker(socket)
+
+	def send(self, msg):
+		self.socket.write(self.packer.pack(msg))
+
+# ==== test servers ====
 
 
 class StreamServer(ThreadingMixIn, UnixStreamServer):
@@ -17,7 +29,8 @@ class StreamServer(ThreadingMixIn, UnixStreamServer):
 class MsgPackHandler(StreamRequestHandler):
 	def __init__(self, request, client_address, server):
 		super().__init__(request, client_address, server)
-		self.unpacker = msgpack.Unpacker(request)
+		self.stream = MpStream(request)
+		# self.unpacker = msgpack.Unpacker(request)
 		self.on_methods = server.on_methods
 		self.log_data = []
 		self.method_counts = {}
@@ -36,21 +49,16 @@ class MsgPackHandler(StreamRequestHandler):
 		self.method_counts[method] = method_count + 1
 		return curr_spec
 
-	def send(self, msg):
-		"log and send a msgpack response"
-		self.log_data.append({"response": msg})
-		self.request.write(msgpack.pack(msg))
-
 	def handle(self):
 		"called for a given connection from a client"
-		for msg in self.unpacker:
+		for msg in self.stream.unpacker:
 			self.log_data.append({"request": msg})
 			type, msgid, method, params = msg
 
 			curr_spec = self.get_curr_spec(method)
 
 			error, result = curr_spec.get('return', ('not implemented', None))
-			self.send((1, msgid, error, result))
+			self.stream.send((1, msgid, error, result))
 
 	def finish(self):
 		"at the end of a connection, show what happened"
@@ -74,17 +82,80 @@ class MsgPackMockServer():
 		MsgPackMockServer(StreamServer(socket, MsgPackHandler), on_methods)
 
 
-protocol_servers = {
-	'MsgPack:1': MsgPackMockServer.start,
+# ==== test clients ====
+
+
+class MsgPackTestClient():
+
+	def __init__(self, socket, try_methods):
+		super().__init__()
+		self.socketname = socket
+		self.log_data = []
+		self.try_methods = try_methods
+
+	def try_method(self, m):
+		method, params = m
+		msg_id = 1
+		self.stream.send((0, msg_id, method, params))
+
+		for msg in self.stream.unpacker:
+			#  TODO: compare with some expected
+			if len(msg) == 3:
+				self.log_data.append({"notification": msg})
+			elif len(msg) == 4:
+				r_type, r_msgid, r_err, r_result = msg
+				if r_type == 1 and r_msgid == msg_id:
+					self.log_data.append({"response": msg})
+					if r_err:
+						logging.error(f"receive error: {r_err}")
+					return
+				raise AssertionError(f"unexpected response: {msg}")
+			else:
+				raise AssertionError(f"malformed message received: {msg}")
+
+	def try_all(self):
+		with open(self.socketname) as socket:
+			self.stream = MpStream(socket)
+			for i, m in enumerate(self.try_methods):
+				try:
+					self.try_method(m)
+				except Exception as e:
+					logging.error(f"trying method #{i}: {e}")
+
+	@staticmethod
+	def start(spec):
+		print("msgpack client....")
+		socket = spec.get('socket', 'mock.socket')
+		print(f"opening socket {socket}")
+		try_methods = spec.get('try_methods', [])
+		MsgPackTestClient(socket, try_methods).try_all()
+
+
+# ==== command start ====
+
+
+test_roles = {
+	'server': {
+		'MsgPack:1': MsgPackMockServer.start,
+	},
+	'client': {
+		'MsgPack:1': MsgPackTestClient.start,
+	},
 }
 
 
 def route_protocol(spec):
+	role = spec.get('role')
+	if role not in test_roles:
+		raise NotImplementedError(f"unkown role '{role}'")
+
+	protocol_handlers = test_roles[role]
+
 	protocol = spec.get('protocol', 'MsgPack:1')
-	if protocol not in protocol_servers:
+	if protocol not in protocol_handlers:
 		raise NotImplementedError(f"unknown protocol '{protocol}'")
 
-	return protocol_servers[protocol](spec)
+	return protocol_handlers[protocol](spec)
 
 
 def main():
@@ -110,4 +181,3 @@ def load_spec(fpath: str):
 
 if __name__ == '__main__':
 	main()
-
