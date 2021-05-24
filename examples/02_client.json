@@ -1,0 +1,11 @@
+{
+	"protocol": "MsgPack:1",
+	"socket": "mock.socket",
+
+	"role": "client",
+	"try_methods": [
+		["plugin.StartInstance", []],
+		["plugin.HandleEvent", []],
+		["plugin.Step", []]
+	]
+}

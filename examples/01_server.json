@@ -1,0 +1,18 @@
+{
+	"protocol": "MsgPack:1",
+	"socket": "mock.socket",
+
+	"role": "server",
+	"on_methods": {
+		"plugin.StartInstance": [
+			{ "return": [null, "{}"]}
+		],
+		"plugin.HandleEvent": [
+			{ "return": [null, ["kong.log.debug", ["hi"]]]}
+		],
+		"plugin.Step": [
+			{ "return": [null, ["kong.log.debug", ["done"]]]},
+			{ "return": [null, "ret"]}
+		]
+	},
+}
