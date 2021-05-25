@@ -1,11 +1,13 @@
 {
 	"protocol": "MsgPack:1",
-	"socket": "mock.socket",
+	"socket": "/usr/local/kong/go-bip-a.socket",
 
 	"role": "client",
+	"start_cmd": "/usr/local/kong/go-plugins/go-bip-a",
 	"try_methods": [
-		["plugin.StartInstance", []],
-		["plugin.HandleEvent", []],
-		["plugin.Step", []]
+		["plugin.StartInstance", [{"Name": "plugname", "Config": "{}"}]],
+		["plugin.HandleEvent", [{"InstanceId": 0, "EventName": "access"}]],
+		["plugin.Step", [{"EventId": 0, "Data": {}}]],
+		["plugin.CloseInstance", [0]]
 	]
 }
